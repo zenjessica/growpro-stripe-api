@@ -51,12 +51,20 @@ class handler(BaseHTTPRequestHandler):
                 self._respond(400, {"error": "No line items provided"}, origin)
                 return
 
+            metadata = body.get("metadata", {})
+            description = body.get("description", "")
+
             stripe_items = []
             for item in line_items:
+                # Support both "amount" (dollars) and "amount_cents" (cents)
+                if "amount_cents" in item:
+                    unit_amount = int(item["amount_cents"])
+                else:
+                    unit_amount = int(float(item["amount"]) * 100)
                 price_data = {
                     "currency": "usd",
                     "product_data": {"name": item["name"]},
-                    "unit_amount": int(float(item["amount"]) * 100),
+                    "unit_amount": unit_amount,
                 }
                 if mode == "subscription":
                     if item.get("recurring", False):
@@ -72,6 +80,10 @@ class handler(BaseHTTPRequestHandler):
             }
             if email:
                 params["customer_email"] = email
+            if metadata:
+                params["metadata"] = metadata
+            if description:
+                params["payment_intent_data"] = {"description": description} if mode == "payment" else {}
 
             session = stripe.checkout.Session.create(**params)
             self._respond(200, {"url": session.url, "id": session.id}, origin)
