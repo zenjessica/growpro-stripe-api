@@ -12,6 +12,7 @@ stripe.api_key = os.environ.get("STRIPE_KEY", "")
 
 ALLOWED_ORIGINS = [
     "https://grow-pro-configurator-a9d468.webflow.io",
+    "https://launch.kickstartsocial.co",
     "https://www.growpro.co",
     "https://growpro.co",
     "http://localhost:8080",
