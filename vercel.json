@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/create-checkout.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/create-checkout",
+      "dest": "/api/create-checkout.py"
+    }
+  ]
+}
