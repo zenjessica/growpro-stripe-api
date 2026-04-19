@@ -50,12 +50,8 @@ class handler(BaseHTTPRequestHandler):
             description = body.get("description", "")
             payment_plan = body.get("payment_plan", None)
 
-            if not line_items:
-                self._respond(400, {"error": "No line items provided"}, origin)
-                return
-
             # --- PAYMENT PLAN MODE ---
-            if payment_plan:
+            if payment_plan and isinstance(payment_plan, dict):
                 down_cents = int(payment_plan["down_payment_cents"])
                 inst_cents = int(payment_plan["installment_cents"])
                 inst_count = int(payment_plan.get("installment_count", 2))
@@ -103,6 +99,10 @@ class handler(BaseHTTPRequestHandler):
 
                 session = stripe.checkout.Session.create(**params)
                 self._respond(200, {"url": session.url, "id": session.id}, origin)
+                return
+
+            if not line_items:
+                self._respond(400, {"error": "No line items provided"}, origin)
                 return
 
             # --- STANDARD MODE (pay-in-full or subscription) ---
