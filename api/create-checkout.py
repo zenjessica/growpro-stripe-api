@@ -88,6 +88,7 @@ class handler(BaseHTTPRequestHandler):
                     "mode": "subscription",
                     "success_url": success_url,
                     "cancel_url": cancel_url,
+                    "allow_promotion_codes": True,
                     "subscription_data": {
                         "trial_period_days": interval_days,
                         "metadata": metadata,
@@ -129,6 +130,7 @@ class handler(BaseHTTPRequestHandler):
                 "mode": mode,
                 "success_url": success_url,
                 "cancel_url": cancel_url,
+                "allow_promotion_codes": True,
             }
             if email:
                 params["customer_email"] = email
