@@ -15,6 +15,9 @@ ALLOWED_ORIGINS = [
     "https://launch.kickstartsocial.co",
     "https://www.growpro.co",
     "https://growpro.co",
+    "https://zenjessica.github.io",
+    "https://www.kickstartsocial.co",
+    "https://kickstartsocial.co",
     "http://localhost:8080",
 ]
 
