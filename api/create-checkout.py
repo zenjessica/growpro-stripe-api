@@ -47,8 +47,8 @@ class handler(BaseHTTPRequestHandler):
 
             line_items = body.get("line_items", [])
             email = body.get("email", "")
-            success_url = body.get("success_url", "https://growpro.co")
-            cancel_url = body.get("cancel_url", "https://growpro.co")
+            success_url = body.get("success_url", "https://launch.kickstartsocial.co/thank-you")
+            cancel_url = body.get("cancel_url", "https://launch.kickstartsocial.co/launch")
             mode = body.get("mode", "payment")
             metadata = body.get("metadata", {})
             description = body.get("description", "")
@@ -92,6 +92,8 @@ class handler(BaseHTTPRequestHandler):
                     "success_url": success_url,
                     "cancel_url": cancel_url,
                     "allow_promotion_codes": True,
+                    "locale": "en",
+                    "adaptive_pricing": {"enabled": False},
                     "subscription_data": {
                         "trial_period_days": interval_days,
                         "metadata": metadata,
@@ -134,6 +136,8 @@ class handler(BaseHTTPRequestHandler):
                 "success_url": success_url,
                 "cancel_url": cancel_url,
                 "allow_promotion_codes": True,
+                "locale": "en",
+                "adaptive_pricing": {"enabled": False},
             }
             if email:
                 params["customer_email"] = email
