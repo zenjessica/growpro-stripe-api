@@ -1,8 +1,3 @@
-"""
-GrowPro Stripe Checkout API — Vercel Serverless Function
-Creates dynamic Stripe Checkout sessions with the exact configurator total.
-Supports: pay-in-full, payment plans (down payment + installments).
-"""
 from http.server import BaseHTTPRequestHandler
 import json
 import os
@@ -11,30 +6,85 @@ import stripe
 stripe.api_key = os.environ.get("STRIPE_KEY", "")
 
 ALLOWED_ORIGINS = [
-    "https://grow-pro-configurator-a9d468.webflow.io",
     "https://launch.kickstartsocial.co",
-    "https://www.growpro.co",
-    "https://growpro.co",
     "https://zenjessica.github.io",
-    "https://www.kickstartsocial.co",
-    "https://kickstartsocial.co",
-    "http://localhost:8080",
+    "https://growpro.co",
 ]
 
 
 def cors_headers(origin="*"):
-    allowed = origin if origin in ALLOWED_ORIGINS else ALLOWED_ORIGINS[0]
+    if origin in ALLOWED_ORIGINS:
+        allow_origin = origin
+    else:
+        allow_origin = "*"
     return {
-        "Access-Control-Allow-Origin": allowed,
+        "Access-Control-Allow-Origin": allow_origin,
         "Access-Control-Allow-Methods": "POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type",
     }
 
 
+def clean(value):
+    return str(value or "").strip()
+
+
+def enrich_customer_fields(body):
+    metadata = body.get("metadata") or {}
+    email = clean(body.get("email") or body.get("customer_email") or metadata.get("email") or metadata.get("customer_email"))
+    first = clean(body.get("first_name") or metadata.get("first_name"))
+    last = clean(body.get("last_name") or metadata.get("last_name"))
+    customer_name = clean(
+        body.get("customer_name")
+        or body.get("client_name")
+        or metadata.get("customer_name")
+        or metadata.get("client_name")
+        or " ".join([part for part in [first, last] if part])
+    )
+    phone = clean(body.get("phone") or metadata.get("phone"))
+    business_name = clean(body.get("business_name") or metadata.get("business_name"))
+
+    enriched = dict(metadata)
+    if email:
+        enriched["email"] = email
+        enriched["customer_email"] = email
+    if customer_name:
+        enriched["customer_name"] = customer_name
+        enriched["client_name"] = customer_name
+    if phone:
+        enriched["phone"] = phone
+    if business_name:
+        enriched["business_name"] = business_name
+
+    return email, customer_name, phone, business_name, enriched
+
+
+def create_customer(email, customer_name, phone, metadata):
+    params = {}
+    if email:
+        params["email"] = email
+    if customer_name:
+        params["name"] = customer_name
+    if phone:
+        params["phone"] = phone
+    if metadata:
+        params["metadata"] = metadata
+    if not params:
+        return None
+    return stripe.Customer.create(**params).id
+
+
+def attach_customer(params, email, customer_name, phone, metadata):
+    customer_id = create_customer(email, customer_name, phone, metadata)
+    if customer_id:
+        params["customer"] = customer_id
+    elif email:
+        params["customer_email"] = email
+
+
 class handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         origin = self.headers.get("Origin", "*")
-        self.send_response(200)
+        self.send_response(204)
         for k, v in cors_headers(origin).items():
             self.send_header(k, v)
         self.end_headers()
@@ -43,121 +93,82 @@ class handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin", "*")
         try:
             length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
 
             line_items = body.get("line_items", [])
-            email = body.get("email", "")
-            success_url = body.get("success_url", "https://launch.kickstartsocial.co/thank-you")
-            cancel_url = body.get("cancel_url", "https://launch.kickstartsocial.co/launch")
+            email, customer_name, phone, business_name, metadata = enrich_customer_fields(body)
+            success_url = body.get("success_url", "https://launch.kickstartsocial.co/?success=true")
+            cancel_url = body.get("cancel_url", "https://launch.kickstartsocial.co/")
             mode = body.get("mode", "payment")
-            metadata = body.get("metadata", {})
             description = body.get("description", "")
             payment_plan = body.get("payment_plan", None)
 
-            # --- PAYMENT PLAN MODE ---
-            if payment_plan and isinstance(payment_plan, dict):
-                down_cents = int(payment_plan["down_payment_cents"])
-                inst_cents = int(payment_plan["installment_cents"])
-                inst_count = int(payment_plan.get("installment_count", 2))
-                interval_days = int(payment_plan.get("interval_days", 28))
-                plan_label = payment_plan.get("plan_label", "Payment Plan")
+            if not stripe.api_key:
+                raise ValueError("Missing STRIPE_KEY environment variable")
 
-                stripe_items = []
+            if not line_items and not payment_plan:
+                raise ValueError("Missing line_items")
 
-                # One-time down payment line item
-                stripe_items.append({
-                    "price_data": {
-                        "currency": "usd",
-                        "product_data": {"name": f"Down Payment \u2014 {plan_label}"},
-                        "unit_amount": down_cents,
-                    },
-                    "quantity": 1,
-                })
-
-                # Recurring installment line item with trial to delay first charge
-                stripe_items.append({
-                    "price_data": {
-                        "currency": "usd",
-                        "product_data": {"name": f"Installment \u2014 {plan_label} ({inst_count} payments)"},
-                        "unit_amount": inst_cents,
-                        "recurring": {"interval": "day", "interval_count": interval_days},
-                    },
-                    "quantity": 1,
-                })
-
+            if payment_plan:
+                amount = int(payment_plan.get("amount_cents", 0))
+                name = payment_plan.get("name", "GrowPro Payment Plan")
+                interval = payment_plan.get("interval", "month")
+                installments = int(payment_plan.get("installments", 1))
                 params = {
-                    "payment_method_types": ["card"],
-                    "line_items": stripe_items,
                     "mode": "subscription",
+                    "line_items": [{
+                        "price_data": {
+                            "currency": "usd",
+                            "product_data": {"name": name},
+                            "unit_amount": amount,
+                            "recurring": {"interval": interval},
+                        },
+                        "quantity": 1,
+                    }],
                     "success_url": success_url,
                     "cancel_url": cancel_url,
-                    "allow_promotion_codes": True,
-                    "locale": "en",
-                    "adaptive_pricing": {"enabled": False},
+                    "metadata": {**metadata, "installments": str(installments), "payment_plan": name},
                     "subscription_data": {
-                        "trial_period_days": interval_days,
-                        "metadata": metadata,
+                        "metadata": {**metadata, "installments": str(installments), "payment_plan": name}
                     },
                 }
-                if email:
-                    params["customer_email"] = email
+                attach_customer(params, email, customer_name, phone, metadata)
+                session = stripe.checkout.Session.create(**params)
+            else:
+                params = {
+                    "mode": mode,
+                    "line_items": line_items,
+                    "success_url": success_url,
+                    "cancel_url": cancel_url,
+                }
+                attach_customer(params, email, customer_name, phone, metadata)
                 if metadata:
                     params["metadata"] = metadata
-
+                if mode == "payment":
+                    payment_intent_data = {}
+                    if description:
+                        payment_intent_data["description"] = description
+                    if metadata:
+                        payment_intent_data["metadata"] = metadata
+                    if email:
+                        payment_intent_data["receipt_email"] = email
+                    if payment_intent_data:
+                        params["payment_intent_data"] = payment_intent_data
+                elif mode == "subscription" and metadata:
+                    params["subscription_data"] = {"metadata": metadata}
                 session = stripe.checkout.Session.create(**params)
-                self._respond(200, {"url": session.url, "id": session.id}, origin)
-                return
 
-            if not line_items:
-                self._respond(400, {"error": "No line items provided"}, origin)
-                return
+            self.send_response(200)
+            for k, v in cors_headers(origin).items():
+                self.send_header(k, v)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"url": session.url}).encode("utf-8"))
 
-            # --- STANDARD MODE (pay-in-full or subscription) ---
-            stripe_items = []
-            for item in line_items:
-                if "amount_cents" in item:
-                    unit_amount = int(item["amount_cents"])
-                else:
-                    unit_amount = int(float(item["amount"]) * 100)
-                price_data = {
-                    "currency": "usd",
-                    "product_data": {"name": item["name"]},
-                    "unit_amount": unit_amount,
-                }
-                if mode == "subscription":
-                    if item.get("recurring", False):
-                        price_data["recurring"] = {"interval": "month"}
-                stripe_items.append({"price_data": price_data, "quantity": 1})
-
-            params = {
-                "payment_method_types": ["card"],
-                "line_items": stripe_items,
-                "mode": mode,
-                "success_url": success_url,
-                "cancel_url": cancel_url,
-                "allow_promotion_codes": True,
-                "locale": "en",
-                "adaptive_pricing": {"enabled": False},
-            }
-            if email:
-                params["customer_email"] = email
-            if metadata:
-                params["metadata"] = metadata
-            if description:
-                params["payment_intent_data"] = {"description": description} if mode == "payment" else {}
-
-            session = stripe.checkout.Session.create(**params)
-            self._respond(200, {"url": session.url, "id": session.id}, origin)
-
-        except stripe.error.StripeError as e:
-            self._respond(500, {"error": str(e)}, origin)
         except Exception as e:
-            self._respond(500, {"error": str(e)}, origin)
-
-    def _respond(self, status, data, origin="*"):
-        self.send_response(status)
-        for k, v in cors_headers(origin).items():
-            self.send_header(k, v)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(json.dumps(data).encode())
+            self.send_response(400)
+            for k, v in cors_headers(origin).items():
+                self.send_header(k, v)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
