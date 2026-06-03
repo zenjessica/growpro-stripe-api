@@ -81,6 +81,23 @@ def attach_customer(params, email, customer_name, phone, metadata):
         params["customer_email"] = email
 
 
+def transform_line_items(raw_items):
+    transformed = []
+    for item in raw_items:
+        if "price_data" in item or "price" in item:
+            transformed.append(item)
+            continue
+        price_data = {
+            "currency": "usd",
+            "unit_amount": int(item["amount_cents"]),
+            "product_data": {"name": str(item.get("name", ""))},
+        }
+        if item.get("recurring"):
+            price_data["recurring"] = {"interval": "month"}
+        transformed.append({"price_data": price_data, "quantity": 1})
+    return transformed
+
+
 class handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         origin = self.headers.get("Origin", "*")
@@ -137,7 +154,7 @@ class handler(BaseHTTPRequestHandler):
             else:
                 params = {
                     "mode": mode,
-                    "line_items": line_items,
+                    "line_items": transform_line_items(line_items),
                     "success_url": success_url,
                     "cancel_url": cancel_url,
                 }
