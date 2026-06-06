@@ -49,7 +49,7 @@ def extract_contact(pi):
         "last_name": last_name,
         "phone": meta.get("phone") or "",
         "business_name": meta.get("business_name") or "",
-        "amount_cents": pi.get("amount") or 0,
+        "amount_dollars": (pi.get("amount") or 0) / 100.0,
         "currency": pi.get("currency") or "usd",
         "payment_intent_id": pi.get("id") or "",
         "description": meta.get("description") or "",
