@@ -87,9 +87,12 @@ def transform_line_items(raw_items):
         if "price_data" in item or "price" in item:
             transformed.append(item)
             continue
+        amount = int(item["amount_cents"])
+        if item.get("recurring") and amount == 0:
+            continue
         price_data = {
             "currency": "usd",
-            "unit_amount": int(item["amount_cents"]),
+            "unit_amount": amount,
             "product_data": {"name": str(item.get("name", ""))},
         }
         if item.get("recurring"):
@@ -127,10 +130,12 @@ class handler(BaseHTTPRequestHandler):
                 raise ValueError("Missing line_items")
 
             if payment_plan:
-                amount = int(payment_plan.get("amount_cents", 0))
-                name = payment_plan.get("name", "GrowPro Payment Plan")
+                amount = int(payment_plan.get("amount_cents") or payment_plan.get("installment_cents") or 0)
+                if amount == 0:
+                    raise ValueError("payment_plan amount is zero -- check installment_cents in payload")
+                name = payment_plan.get("name") or payment_plan.get("plan_label") or "GrowPro Payment Plan"
                 interval = payment_plan.get("interval", "month")
-                installments = int(payment_plan.get("installments", 1))
+                installments = int(payment_plan.get("installments") or payment_plan.get("installment_count") or 1)
                 params = {
                     "mode": "subscription",
                     "line_items": [{
@@ -150,6 +155,8 @@ class handler(BaseHTTPRequestHandler):
                     },
                 }
                 attach_customer(params, email, customer_name, phone, metadata)
+                params["billing_address_collection"] = "required"
+                params["phone_number_collection"] = {"enabled": True}
                 session = stripe.checkout.Session.create(**params)
             else:
                 params = {
@@ -173,6 +180,8 @@ class handler(BaseHTTPRequestHandler):
                         params["payment_intent_data"] = payment_intent_data
                 elif mode == "subscription" and metadata:
                     params["subscription_data"] = {"metadata": metadata}
+                params["billing_address_collection"] = "required"
+                params["phone_number_collection"] = {"enabled": True}
                 session = stripe.checkout.Session.create(**params)
 
             self.send_response(200)

@@ -2,10 +2,12 @@
   "version": 2,
   "builds": [
     { "src": "api/create-checkout.py", "use": "@vercel/python" },
-    { "src": "api/webhook.py", "use": "@vercel/python" }
+    { "src": "api/webhook.py", "use": "@vercel/python" },
+    { "src": "api/stripe-webhook.py", "use": "@vercel/python" }
   ],
   "routes": [
     { "src": "/api/create-checkout", "dest": "/api/create-checkout.py" },
-    { "src": "/api/webhook", "dest": "/api/webhook.py" }
+    { "src": "/api/webhook", "dest": "/api/webhook.py" },
+    { "src": "/api/stripe-webhook", "dest": "/api/stripe-webhook.py" }
   ]
 }
